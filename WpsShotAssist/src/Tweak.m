@@ -2,6 +2,7 @@
 #import <objc/runtime.h>
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
+#import <AudioToolbox/AudioToolbox.h>
 
 // ==========================================
 // Mock UITouch for 100% Native Flutter Touch Delivery
@@ -40,7 +41,7 @@
 @end
 
 // ==========================================
-// Status Toast Overlay (Only for Calibration Banner)
+// Status Toast Overlay (Bildirim & Geri Bildirim)
 // ==========================================
 @interface WpsStatusOverlay : UIView
 @property (nonatomic, copy) NSString *message;
@@ -62,15 +63,28 @@
     if (!ctx) return;
 
     CGSize scr = self.bounds.size;
-    CGRect bannerRect = CGRectMake(scr.width / 2.0f - 180.0f, 10.0f, 360.0f, 26.0f);
-    CGContextSetRGBFillColor(ctx, 0.0, 0.0, 0.0, 0.75);
-    CGContextFillRect(ctx, bannerRect);
+    CGRect bannerRect = CGRectMake(scr.width / 2.0f - 190.0f, 10.0f, 380.0f, 28.0f);
+    
+    // Yarı saydam yuvarlatılmış siyah arka plan
+    UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:bannerRect cornerRadius:6.0f];
+    CGContextSetRGBFillColor(ctx, 0.0, 0.0, 0.0, 0.80);
+    [path fill];
+
+    // Altın sarısı çerçeve
+    CGContextSetRGBStrokeColor(ctx, 1.0, 0.85, 0.1, 0.9);
+    CGContextSetLineWidth(ctx, 1.0);
+    [path stroke];
 
     NSDictionary *attrs = @{
-        NSFontAttributeName: [UIFont boldSystemFontOfSize:12.0f],
-        NSForegroundColorAttributeName: [UIColor colorWithRed:1.0f green:0.85f blue:0.1f alpha:1.0f]
+        NSFontAttributeName: [UIFont boldSystemFontOfSize:12.5f],
+        NSForegroundColorAttributeName: [UIColor colorWithRed:1.0f green:0.88f blue:0.15f alpha:1.0f]
     };
-    [self.message drawInRect:CGRectMake(bannerRect.origin.x + 10, bannerRect.origin.y + 5, bannerRect.size.width - 20, 18) withAttributes:attrs];
+    
+    CGSize textSz = [self.message sizeWithAttributes:attrs];
+    CGRect textRect = CGRectMake(bannerRect.origin.x + (bannerRect.size.width - textSz.width) / 2.0f,
+                                 bannerRect.origin.y + (bannerRect.size.height - textSz.height) / 2.0f,
+                                 textSz.width, textSz.height);
+    [self.message drawInRect:textRect withAttributes:attrs];
 }
 @end
 
@@ -81,13 +95,16 @@
 + (instancetype)sharedInstance;
 - (void)setupTweak;
 - (void)onKickButtonTouchedAt:(CGPoint)pos;
-- (void)triggerPerfectCornerShot;
+- (void)executeShotToRightCorner:(BOOL)targetRight;
+- (void)toggleAttackDirection;
 @end
 
 @implementation WpsShotManager {
     UIButton *_shotBtn;
+    UILabel *_directionLabel;
     WpsStatusOverlay *_statusOverlay;
     BOOL _targetingRightCorner;
+    BOOL _attackDirectionDown; // NO = Üst Kale (Default), YES = Alt Kale
     CGPoint _calibratedKickPos;
     BOOL _isCalibrated;
 }
@@ -117,6 +134,22 @@
     return nil;
 }
 
+- (void)showToast:(NSString *)msg duration:(NSTimeInterval)sec {
+    if (!_statusOverlay) return;
+    _statusOverlay.message = msg;
+    [_statusOverlay setNeedsDisplay];
+
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(clearToast) object:nil];
+    [self performSelector:@selector(clearToast) withObject:nil afterDelay:sec];
+}
+
+- (void)clearToast {
+    if (_statusOverlay) {
+        _statusOverlay.message = @"";
+        [_statusOverlay setNeedsDisplay];
+    }
+}
+
 - (void)setupTweak {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UIWindow *keyWin = nil;
@@ -132,41 +165,69 @@
         CGFloat w = MAX(scr.width, scr.height);
         CGFloat h = MIN(scr.width, scr.height);
 
-        // Ekran görüntüsünden teyit edilen gerçek koordinat: (761, 212)
+        // Canlı maç görüntüsünden tespit edilen kesin pozisyon: (761, 212)
         self->_calibratedKickPos = CGPointMake(761.0f, 212.0f);
         self->_isCalibrated = YES;
+        self->_attackDirectionDown = NO; // Varsayılan: Üst Kale
 
         // Bilgilendirme Banner Katmanı
         if (!self->_statusOverlay) {
             self->_statusOverlay = [[WpsStatusOverlay alloc] initWithFrame:CGRectMake(0, 0, w, h)];
-            self->_statusOverlay.message = @"[WPS] ⚡SHOT Butonu Hazır! (761, 212)";
             [keyWin addSubview:self->_statusOverlay];
-
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                self->_statusOverlay.message = @"";
-                [self->_statusOverlay setNeedsDisplay];
-            });
+            [self showToast:@"[WPS] ⚡ 90 Şut Butonu Hazır (Sol Tık: Sol 90 | Sağ Tık: Sağ 90)" duration:4.0];
         }
 
-        // ⚡SHOT Butonu (Kırmızı Daire)
+        // ⚡SHOT Butonu (Kırmızı / Altın Daire)
         if (!self->_shotBtn) {
+            CGFloat btnSize = 70.0f;
             self->_shotBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-            self->_shotBtn.frame = CGRectMake(w - 75.0f, h / 2.0f - 35.0f, 65.0f, 65.0f);
-            self->_shotBtn.backgroundColor = [UIColor colorWithRed:0.95f green:0.15f blue:0.25f alpha:0.92f];
-            [self->_shotBtn setTitle:@"⚡SHOT" forState:UIControlStateNormal];
-            self->_shotBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14.0f];
-            [self->_shotBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            self->_shotBtn.layer.cornerRadius = 32.5f;
+            self->_shotBtn.frame = CGRectMake(w - 85.0f, h / 2.0f - 35.0f, btnSize, btnSize);
+            self->_shotBtn.backgroundColor = [UIColor colorWithRed:0.92f green:0.12f blue:0.20f alpha:0.95f];
+            self->_shotBtn.layer.cornerRadius = btnSize / 2.0f;
             self->_shotBtn.layer.borderWidth = 2.5f;
             self->_shotBtn.layer.borderColor = [UIColor whiteColor].CGColor;
             self->_shotBtn.layer.shadowColor = [UIColor blackColor].CGColor;
             self->_shotBtn.layer.shadowOffset = CGSizeMake(0, 3);
-            self->_shotBtn.layer.shadowOpacity = 0.5f;
-            self->_shotBtn.layer.shadowRadius = 4.0f;
+            self->_shotBtn.layer.shadowOpacity = 0.6f;
+            self->_shotBtn.layer.shadowRadius = 5.0f;
 
+            // İçerik Başlıkları
+            UILabel *topLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 10, btnSize, 20)];
+            topLbl.text = @"⚡SHOT";
+            topLbl.font = [UIFont boldSystemFontOfSize:14.0f];
+            topLbl.textColor = [UIColor whiteColor];
+            topLbl.textAlignment = NSTextAlignmentCenter;
+            topLbl.userInteractionEnabled = NO;
+            [self->_shotBtn addSubview:topLbl];
+
+            UILabel *subLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 30, btnSize, 14)];
+            subLbl.text = @"◀ L | R ▶";
+            subLbl.font = [UIFont boldSystemFontOfSize:10.5f];
+            subLbl.textColor = [UIColor colorWithRed:1.0f green:0.85f blue:0.15f alpha:1.0f];
+            subLbl.textAlignment = NSTextAlignmentCenter;
+            subLbl.userInteractionEnabled = NO;
+            [self->_shotBtn addSubview:subLbl];
+
+            self->_directionLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 46, btnSize, 14)];
+            self->_directionLabel.text = @"⬆ ÜST";
+            self->_directionLabel.font = [UIFont boldSystemFontOfSize:9.5f];
+            self->_directionLabel.textColor = [UIColor colorWithWhite:0.9 alpha:1.0];
+            self->_directionLabel.textAlignment = NSTextAlignmentCenter;
+            self->_directionLabel.userInteractionEnabled = NO;
+            [self->_shotBtn addSubview:self->_directionLabel];
+
+            // Tıklama Olayı (Sol yarı = Sol 90, Sağ yarı = Sağ 90)
+            [self->_shotBtn addTarget:self action:@selector(handleShotBtnTapped:forEvent:) forControlEvents:UIControlEventTouchUpInside];
+
+            // Sürükleyip Taşıma (Pan)
             UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
             [self->_shotBtn addGestureRecognizer:pan];
-            [self->_shotBtn addTarget:self action:@selector(triggerPerfectCornerShot) forControlEvents:UIControlEventTouchUpInside];
+
+            // Uzun Basma: Kale Yönünü Değiştir (Üst ⬆️ <-> Alt ⬇️)
+            UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+            lp.minimumPressDuration = 0.45;
+            [self->_shotBtn addGestureRecognizer:lp];
+
             [keyWin addSubview:self->_shotBtn];
         }
 
@@ -178,13 +239,7 @@
 - (void)onKickButtonTouchedAt:(CGPoint)pos {
     _calibratedKickPos = pos;
     _isCalibrated = YES;
-    _statusOverlay.message = [NSString stringWithFormat:@"🎯 ŞUT BUTONU: (%.0f, %.0f)", pos.x, pos.y];
-    [_statusOverlay setNeedsDisplay];
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        self->_statusOverlay.message = @"";
-        [self->_statusOverlay setNeedsDisplay];
-    });
+    [self showToast:[NSString stringWithFormat:@"🎯 ŞUT BUTONU GÜNCELLENDİ: (%.0f, %.0f)", pos.x, pos.y] duration:2.5];
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)p {
@@ -194,26 +249,62 @@
     [p setTranslation:CGPointZero inView:v.superview];
 }
 
+- (void)handleLongPress:(UILongPressGestureRecognizer *)lp {
+    if (lp.state == UIGestureRecognizerStateBegan) {
+        [self toggleAttackDirection];
+    }
+}
+
+- (void)toggleAttackDirection {
+    _attackDirectionDown = !_attackDirectionDown;
+    AudioServicesPlaySystemSound(1519); // Peek haptic feedback
+
+    if (_directionLabel) {
+        _directionLabel.text = _attackDirectionDown ? @"⬇ ALT" : @"⬆ ÜST";
+        _directionLabel.textColor = _attackDirectionDown ? [UIColor colorWithRed:0.3f green:0.8f blue:1.0f alpha:1.0f] : [UIColor colorWithWhite:0.9 alpha:1.0];
+    }
+
+    NSString *dirText = _attackDirectionDown ? @"⬇️ HEDEF: ALT KALE" : @"⬆️ HEDEF: ÜST KALE";
+    [self showToast:[NSString stringWithFormat:@"🔄 HEDEF KALE DEĞİŞTİ: %@", dirText] duration:2.5];
+}
+
+- (void)handleShotBtnTapped:(UIButton *)btn forEvent:(UIEvent *)event {
+    UITouch *t = [[event touchesForView:btn] anyObject];
+    CGPoint loc = [t locationInView:btn];
+
+    // Butonun sol yarısına basıldıysa Sol Köşe, sağ yarısına basıldıysa Sağ Köşe
+    BOOL targetRight = (loc.x >= btn.bounds.size.width / 2.0f);
+    [self executeShotToRightCorner:targetRight];
+}
+
 - (void)setupVolumeHook {
     NSError *err;
     [[AVAudioSession sharedInstance] setActive:YES error:&err];
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryAmbient error:&err];
     [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(triggerPerfectCornerShot)
+                                             selector:@selector(onVolumeTrigger)
                                                  name:@"AVSystemController_SystemVolumeDidChangeNotification"
                                                object:nil];
 }
 
-// Mükemmel Kırmızı Şut İcrası (Native touchesBegan / touchesMoved / touchesEnded)
-- (void)triggerPerfectCornerShot {
-    // Buton basılma efekti
+- (void)onVolumeTrigger {
+    // Ses tuşuna basıldığında köşeleri sırayla dene
+    _targetingRightCorner = !_targetingRightCorner;
+    [self executeShotToRightCorner:_targetingRightCorner];
+}
+
+// ==========================================
+// Mükemmel 90'a Şut İcrası
+// ==========================================
+- (void)executeShotToRightCorner:(BOOL)targetRight {
+    // Buton basılma animasyonu
     [UIView animateWithDuration:0.06 animations:^{
-        self->_shotBtn.transform = CGAffineTransformMakeScale(0.82, 0.82);
-        self->_shotBtn.backgroundColor = [UIColor colorWithRed:1.0f green:0.85f blue:0.0f alpha:1.0f];
+        self->_shotBtn.transform = CGAffineTransformMakeScale(0.85, 0.85);
+        self->_shotBtn.backgroundColor = [UIColor colorWithRed:1.0f green:0.82f blue:0.0f alpha:1.0f];
     } completion:^(BOOL fin) {
         [UIView animateWithDuration:0.06 animations:^{
             self->_shotBtn.transform = CGAffineTransformIdentity;
-            self->_shotBtn.backgroundColor = [UIColor colorWithRed:0.95f green:0.15f blue:0.25f alpha:0.92f];
+            self->_shotBtn.backgroundColor = [UIColor colorWithRed:0.92f green:0.12f blue:0.20f alpha:0.95f];
         }];
     }];
 
@@ -223,18 +314,26 @@
     UIViewController *fvc = [self findFlutterVC:keyWin.rootViewController];
     if (!fvc) return;
 
-    // Hedef: Kalenin alt sol veya alt sağ direk köşesi
-    _targetingRightCorner = !_targetingRightCorner;
-    // Kaleye doğru çekim açısı: Sol direk (-0.75 radyan) / Sağ direk (-0.25 radyan)
-    CGFloat angle = _targetingRightCorner ? -0.30f : -0.80f;
-    CGFloat dragDist = 75.0f; // Tam kırmızı şut barı dolumu
+    // GEOMETRİ HESAPLAMASI (Piksel Kalibrasyonu):
+    // Kale ekranın üstünde (y = 0 yönü, yani dy negatif).
+    // Oyuncu ceza sahası yayından kaleye şut çekerken:
+    // Düz yukarı vektör: dx = 0, dy = -73.0f
+    // Sol Direk / Sol 90 (Kale sol iç köşe): dx = -18.0f, dy = -73.0f (Hafif sola yukarı)
+    // Sağ Direk / Sağ 90 (Kale sağ iç köşe): dx = +18.0f, dy = -73.0f (Hafif sağa yukarı)
+    // Eğer alt kaleye hücum ediliyorsa dy pozitif (+73.0f).
+    CGFloat dx = targetRight ? 18.0f : -18.0f;
+    CGFloat dy = _attackDirectionDown ? 73.0f : -73.0f;
 
     CGPoint startPt = _calibratedKickPos;
-    CGPoint endPt = CGPointMake(startPt.x + dragDist * cosf(angle), startPt.y + dragDist * sinf(angle));
+    CGPoint endPt = CGPointMake(startPt.x + dx, startPt.y + dy);
+
+    NSString *cornerName = targetRight ? @"SAĞ 90" : @"SOL 90";
+    NSString *kaleName = _attackDirectionDown ? @"ALT KALE" : @"ÜST KALE";
+    [self showToast:[NSString stringWithFormat:@"⚡ 90'A ŞUT: %@ %@ 🎯", kaleName, cornerName] duration:1.5];
 
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
 
-    // 1. ADIM: Mavi şut butonuna dokun (touchesBegan)
+    // 1. ADIM: Mavi şut butonunun merkezine dokun (touchesBegan)
     WpsMockTouch *touch = [[WpsMockTouch alloc] init];
     touch.customWindow = keyWin;
     touch.customView = fvc.view;
@@ -245,7 +344,7 @@
 
     [fvc touchesBegan:[NSSet setWithObject:touch] withEvent:nil];
 
-    // 2. ADIM: Köşe direğe doğru sürükle (touchesMoved -> Aim Vector)
+    // 2. ADIM: Kalenin köşesine doğru çek (touchesMoved -> Aim Vector & Bar Dolumu)
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         touch.customPreviousLocation = startPt;
         touch.customLocation = endPt;
@@ -254,7 +353,7 @@
 
         [fvc touchesMoved:[NSSet setWithObject:touch] withEvent:nil];
 
-        // 3. ADIM: Barın tam kırmızıya dolması (~0.35 saniye) ve bırakılması (touchesEnded -> 49.9999 Max Shot)
+        // 3. ADIM: Barın tam kırmızıya dolması (0.35s) ve topun kaleye fırlatılması (touchesEnded -> 49.9999 Max Şut)
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             touch.customPreviousLocation = endPt;
             touch.customLocation = endPt;
@@ -303,7 +402,7 @@
                 CGFloat w = MAX(scr.width, scr.height);
                 CGFloat h = MIN(scr.width, scr.height);
 
-                // Ekranın sağ alt çeyreğine dokunulduysa
+                // Ekranın sağ alt çeyreğindeki şut alanına dokunulduysa konumu güncelle
                 if (pt.x > (w * 0.55f) && pt.y > (h * 0.40f)) {
                     [[WpsShotManager sharedInstance] onKickButtonTouchedAt:pt];
                 }
@@ -320,9 +419,9 @@
 __attribute__((constructor))
 static void WpsInit(void) {
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
-                                                      object:nil
-                                                       queue:[NSOperationQueue mainQueue]
-                                                  usingBlock:^(NSNotification * _Nonnull note) {
+                                                       object:nil
+                                                        queue:[NSOperationQueue mainQueue]
+                                                   usingBlock:^(NSNotification * _Nonnull note) {
         [[WpsShotManager sharedInstance] setupTweak];
     }];
 }
