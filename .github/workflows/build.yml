@@ -21,6 +21,8 @@ jobs:
             -framework Foundation \
             -framework CoreGraphics \
             -framework QuartzCore \
+            -framework Metal \
+            -framework IOSurface \
             -framework AVFoundation \
             -framework AudioToolbox \
             -o WpsShotAssist.dylib \
