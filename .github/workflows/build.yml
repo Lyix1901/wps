@@ -19,6 +19,7 @@ jobs:
             -fobjc-arc \
             -framework UIKit \
             -framework Foundation \
+            -framework CoreGraphics \
             -framework AVFoundation \
             -o WpsShotAssist.dylib \
             WpsShotAssist/src/Tweak.m
