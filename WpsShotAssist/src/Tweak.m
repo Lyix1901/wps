@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <AVFoundation/AVFoundation.h>
+#import <QuartzCore/QuartzCore.h>
 #import <dlfcn.h>
 #import <mach/mach_time.h>
 
