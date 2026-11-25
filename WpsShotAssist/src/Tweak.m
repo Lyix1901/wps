@@ -63,21 +63,21 @@
     if (!ctx) return;
 
     CGSize scr = self.bounds.size;
-    CGRect bannerRect = CGRectMake(scr.width / 2.0f - 190.0f, 10.0f, 380.0f, 28.0f);
+    CGRect bannerRect = CGRectMake(scr.width / 2.0f - 200.0f, 10.0f, 400.0f, 28.0f);
     
     // Yarı saydam yuvarlatılmış siyah arka plan
     UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:bannerRect cornerRadius:6.0f];
-    CGContextSetRGBFillColor(ctx, 0.0, 0.0, 0.0, 0.80);
+    CGContextSetRGBFillColor(ctx, 0.0, 0.0, 0.0, 0.82);
     [path fill];
 
-    // Altın sarısı çerçeve
-    CGContextSetRGBStrokeColor(ctx, 1.0, 0.85, 0.1, 0.9);
-    CGContextSetLineWidth(ctx, 1.0);
+    // Kırmızı/Altın çerçeve
+    CGContextSetRGBStrokeColor(ctx, 1.0, 0.2, 0.2, 0.95);
+    CGContextSetLineWidth(ctx, 1.2);
     [path stroke];
 
     NSDictionary *attrs = @{
         NSFontAttributeName: [UIFont boldSystemFontOfSize:12.5f],
-        NSForegroundColorAttributeName: [UIColor colorWithRed:1.0f green:0.88f blue:0.15f alpha:1.0f]
+        NSForegroundColorAttributeName: [UIColor colorWithRed:1.0f green:0.9f blue:0.2f alpha:1.0f]
     };
     
     CGSize textSz = [self.message sizeWithAttributes:attrs];
@@ -107,6 +107,7 @@
     BOOL _attackDirectionDown; // NO = Üst Kale (Default), YES = Alt Kale
     CGPoint _calibratedKickPos;
     BOOL _isCalibrated;
+    BOOL _isShooting;
 }
 
 + (instancetype)sharedInstance {
@@ -174,7 +175,7 @@
         if (!self->_statusOverlay) {
             self->_statusOverlay = [[WpsStatusOverlay alloc] initWithFrame:CGRectMake(0, 0, w, h)];
             [keyWin addSubview:self->_statusOverlay];
-            [self showToast:@"[WPS] ⚡ 90 Şut Butonu Hazır (Sol Tık: Sol 90 | Sağ Tık: Sağ 90)" duration:4.0];
+            [self showToast:@"[WPS] ⚡ TAM KIRMIZI 90 ŞUT HAZIR (L: Sol 90 | R: Sağ 90)" duration:4.0];
         }
 
         // ⚡SHOT Butonu (Kırmızı / Altın Daire)
@@ -182,7 +183,7 @@
             CGFloat btnSize = 70.0f;
             self->_shotBtn = [UIButton buttonWithType:UIButtonTypeCustom];
             self->_shotBtn.frame = CGRectMake(w - 85.0f, h / 2.0f - 35.0f, btnSize, btnSize);
-            self->_shotBtn.backgroundColor = [UIColor colorWithRed:0.92f green:0.12f blue:0.20f alpha:0.95f];
+            self->_shotBtn.backgroundColor = [UIColor colorWithRed:0.92f green:0.10f blue:0.18f alpha:0.95f];
             self->_shotBtn.layer.cornerRadius = btnSize / 2.0f;
             self->_shotBtn.layer.borderWidth = 2.5f;
             self->_shotBtn.layer.borderColor = [UIColor whiteColor].CGColor;
@@ -192,7 +193,7 @@
             self->_shotBtn.layer.shadowRadius = 5.0f;
 
             // İçerik Başlıkları
-            UILabel *topLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 10, btnSize, 20)];
+            UILabel *topLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 8, btnSize, 20)];
             topLbl.text = @"⚡SHOT";
             topLbl.font = [UIFont boldSystemFontOfSize:14.0f];
             topLbl.textColor = [UIColor whiteColor];
@@ -200,7 +201,7 @@
             topLbl.userInteractionEnabled = NO;
             [self->_shotBtn addSubview:topLbl];
 
-            UILabel *subLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 30, btnSize, 14)];
+            UILabel *subLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 28, btnSize, 14)];
             subLbl.text = @"◀ L | R ▶";
             subLbl.font = [UIFont boldSystemFontOfSize:10.5f];
             subLbl.textColor = [UIColor colorWithRed:1.0f green:0.85f blue:0.15f alpha:1.0f];
@@ -209,9 +210,9 @@
             [self->_shotBtn addSubview:subLbl];
 
             self->_directionLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 46, btnSize, 14)];
-            self->_directionLabel.text = @"⬆ ÜST";
-            self->_directionLabel.font = [UIFont boldSystemFontOfSize:9.5f];
-            self->_directionLabel.textColor = [UIColor colorWithWhite:0.9 alpha:1.0];
+            self->_directionLabel.text = @"🔴 MAX 49";
+            self->_directionLabel.font = [UIFont boldSystemFontOfSize:9.0f];
+            self->_directionLabel.textColor = [UIColor colorWithWhite:0.95 alpha:1.0];
             self->_directionLabel.textAlignment = NSTextAlignmentCenter;
             self->_directionLabel.userInteractionEnabled = NO;
             [self->_shotBtn addSubview:self->_directionLabel];
@@ -259,11 +260,6 @@
     _attackDirectionDown = !_attackDirectionDown;
     AudioServicesPlaySystemSound(1519); // Peek haptic feedback
 
-    if (_directionLabel) {
-        _directionLabel.text = _attackDirectionDown ? @"⬇ ALT" : @"⬆ ÜST";
-        _directionLabel.textColor = _attackDirectionDown ? [UIColor colorWithRed:0.3f green:0.8f blue:1.0f alpha:1.0f] : [UIColor colorWithWhite:0.9 alpha:1.0];
-    }
-
     NSString *dirText = _attackDirectionDown ? @"⬇️ HEDEF: ALT KALE" : @"⬆️ HEDEF: ÜST KALE";
     [self showToast:[NSString stringWithFormat:@"🔄 HEDEF KALE DEĞİŞTİ: %@", dirText] duration:2.5];
 }
@@ -294,46 +290,45 @@
 }
 
 // ==========================================
-// Mükemmel 90'a Şut İcrası
+// Mükemmel 100% Kırmızı Bar 90'a Şut İcrası
 // ==========================================
 - (void)executeShotToRightCorner:(BOOL)targetRight {
-    // Buton basılma animasyonu
-    [UIView animateWithDuration:0.06 animations:^{
-        self->_shotBtn.transform = CGAffineTransformMakeScale(0.85, 0.85);
-        self->_shotBtn.backgroundColor = [UIColor colorWithRed:1.0f green:0.82f blue:0.0f alpha:1.0f];
-    } completion:^(BOOL fin) {
-        [UIView animateWithDuration:0.06 animations:^{
-            self->_shotBtn.transform = CGAffineTransformIdentity;
-            self->_shotBtn.backgroundColor = [UIColor colorWithRed:0.92f green:0.12f blue:0.20f alpha:0.95f];
-        }];
-    }];
+    if (_isShooting) return; // Çakışmayı önle
+    _isShooting = YES;
+
+    // Buton basılma animasyonu (Şarj esnasında sarıdan kırmızıya geçiş)
+    self->_shotBtn.transform = CGAffineTransformMakeScale(0.85, 0.85);
+    self->_shotBtn.backgroundColor = [UIColor colorWithRed:1.0f green:0.85f blue:0.0f alpha:1.0f];
 
     UIWindow *keyWin = [UIApplication sharedApplication].keyWindow;
-    if (!keyWin) return;
+    if (!keyWin) {
+        _isShooting = NO;
+        return;
+    }
 
     UIViewController *fvc = [self findFlutterVC:keyWin.rootViewController];
-    if (!fvc) return;
+    if (!fvc) {
+        _isShooting = NO;
+        return;
+    }
 
-    // GEOMETRİ HESAPLAMASI (Piksel Kalibrasyonu):
-    // Kale ekranın üstünde (y = 0 yönü, yani dy negatif).
-    // Oyuncu ceza sahası yayından kaleye şut çekerken:
-    // Düz yukarı vektör: dx = 0, dy = -73.0f
-    // Sol Direk / Sol 90 (Kale sol iç köşe): dx = -18.0f, dy = -73.0f (Hafif sola yukarı)
-    // Sağ Direk / Sağ 90 (Kale sağ iç köşe): dx = +18.0f, dy = -73.0f (Hafif sağa yukarı)
-    // Eğer alt kaleye hücum ediliyorsa dy pozitif (+73.0f).
-    CGFloat dx = targetRight ? 18.0f : -18.0f;
-    CGFloat dy = _attackDirectionDown ? 73.0f : -73.0f;
+    // GEOMETRİ & GÜÇ KALİBRASYONU:
+    // Kale yönü: Üst kale için dy negatif (-82.0f), Alt kale için dy pozitif (+82.0f)
+    // Direk açısı: Sol köşe dx = -20.0f, Sağ köşe dx = +20.0f
+    // Vektör mesafesi: sqrt(20^2 + 82^2) = 84.4f (Joystick limitini 100% zorlar)
+    CGFloat dx = targetRight ? 20.0f : -20.0f;
+    CGFloat dy = _attackDirectionDown ? 82.0f : -82.0f;
 
     CGPoint startPt = _calibratedKickPos;
     CGPoint endPt = CGPointMake(startPt.x + dx, startPt.y + dy);
 
     NSString *cornerName = targetRight ? @"SAĞ 90" : @"SOL 90";
     NSString *kaleName = _attackDirectionDown ? @"ALT KALE" : @"ÜST KALE";
-    [self showToast:[NSString stringWithFormat:@"⚡ 90'A ŞUT: %@ %@ 🎯", kaleName, cornerName] duration:1.5];
+    [self showToast:[NSString stringWithFormat:@"🔴 TAM GÜÇ ŞUT ŞARJ OLUYOR: %@ %@...", kaleName, cornerName] duration:1.5];
 
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
 
-    // 1. ADIM: Mavi şut butonunun merkezine dokun (touchesBegan)
+    // 1. ADIM: Şut butonunun merkezine bas (touchesBegan)
     WpsMockTouch *touch = [[WpsMockTouch alloc] init];
     touch.customWindow = keyWin;
     touch.customView = fvc.view;
@@ -344,23 +339,54 @@
 
     [fvc touchesBegan:[NSSet setWithObject:touch] withEvent:nil];
 
-    // 2. ADIM: Kalenin köşesine doğru çek (touchesMoved -> Aim Vector & Bar Dolumu)
+    // 2. ADIM: Köşe direğe doğru joysticki sonuna kadar çek (touchesMoved)
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         touch.customPreviousLocation = startPt;
         touch.customLocation = endPt;
         touch.customPhase = UITouchPhaseMoved;
         touch.customTimestamp = [NSDate timeIntervalSinceReferenceDate];
-
         [fvc touchesMoved:[NSSet setWithObject:touch] withEvent:nil];
 
-        // 3. ADIM: Barın tam kırmızıya dolması (0.35s) ve topun kaleye fırlatılması (touchesEnded -> 49.9999 Max Şut)
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        // Şarj sırasında butonu kırmızıya çevir
+        [UIView animateWithDuration:0.40 animations:^{
+            self->_shotBtn.backgroundColor = [UIColor colorWithRed:1.0f green:0.0f blue:0.0f alpha:1.0f];
+        }];
+
+        // Flutter Ticker şarjının takılmaması için ara dokunuş akışı (250ms & 500ms)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            touch.customPreviousLocation = endPt;
+            touch.customLocation = endPt;
+            touch.customPhase = UITouchPhaseMoved;
+            touch.customTimestamp = [NSDate timeIntervalSinceReferenceDate];
+            [fvc touchesMoved:[NSSet setWithObject:touch] withEvent:nil];
+        });
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.50 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            touch.customPreviousLocation = endPt;
+            touch.customLocation = endPt;
+            touch.customPhase = UITouchPhaseMoved;
+            touch.customTimestamp = [NSDate timeIntervalSinceReferenceDate];
+            [fvc touchesMoved:[NSSet setWithObject:touch] withEvent:nil];
+        });
+
+        // 3. ADIM: Bar 100% Tam Kırmızıya (Max 49.9999 Hız) ulaştığında (0.80 saniye) şutu ateşle (touchesEnded)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.80 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             touch.customPreviousLocation = endPt;
             touch.customLocation = endPt;
             touch.customPhase = UITouchPhaseEnded;
             touch.customTimestamp = [NSDate timeIntervalSinceReferenceDate];
 
             [fvc touchesEnded:[NSSet setWithObject:touch] withEvent:nil];
+
+            // Efektleri sıfırla
+            [UIView animateWithDuration:0.10 animations:^{
+                self->_shotBtn.transform = CGAffineTransformIdentity;
+                self->_shotBtn.backgroundColor = [UIColor colorWithRed:0.92f green:0.10f blue:0.18f alpha:0.95f];
+            }];
+
+            AudioServicesPlaySystemSound(1520); // Ağır vuruş haptic feedback
+            [self showToast:[NSString stringWithFormat:@"🚀 GOL! TAM KIRMIZI 49.9999 %@ 🎯", cornerName] duration:2.0];
+            self->_isShooting = NO;
         });
     });
 }
