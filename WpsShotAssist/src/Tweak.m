@@ -9,6 +9,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <math.h>
+#import <stdlib.h>
 
 // ==========================================
 // IOSurface C API Declarations (Public iOS SDK Framework)
@@ -66,7 +67,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 @property (nonatomic, assign) CGPoint leftPostPt;
 @property (nonatomic, assign) CGPoint rightPostPt;
 @property (nonatomic, assign) CGPoint playerPt;
-@property (nonatomic, assign) int lockMode; // 0=Varsayılan, 1=Saha Çizgisi Kilidi, 2=Kale Ağı Tam Kilit
+@property (nonatomic, assign) int lockMode;
 @end
 
 @implementation WpsStatusOverlay
@@ -85,21 +86,21 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 
     CGSize scr = self.bounds.size;
 
-    // 1. Oyuncu Noktasından (playerPt) Haritadaki Sol ve Sağ Kale Direği Noktalarına (leftPostPt / rightPostPt) Kesikli Çizgi
+    // 1. Oyuncu Noktasından (playerPt) Haritadaki Sol ve Sağ Kale Direği Noktalarına Kesikli Çizgi
     if (self.playerPt.x > 10.0f) {
         CGFloat dashLengths[2] = {5.0f, 4.0f};
 
         // Sol direk nişan hattı (Turkuaz)
         CGContextSaveGState(ctx);
         CGContextSetLineDash(ctx, 0, dashLengths, 2);
-        CGContextSetRGBStrokeColor(ctx, 0.0f, 0.95f, 1.0f, 0.75f);
+        CGContextSetRGBStrokeColor(ctx, 0.0f, 0.95f, 1.0f, 0.80f);
         CGContextSetLineWidth(ctx, 1.8f);
         CGContextMoveToPoint(ctx, self.playerPt.x, self.playerPt.y);
         CGContextAddLineToPoint(ctx, self.leftPostPt.x, self.leftPostPt.y);
         CGContextStrokePath(ctx);
 
         // Sağ direk nişan hattı (Sarı/Turuncu)
-        CGContextSetRGBStrokeColor(ctx, 1.0f, 0.80f, 0.0f, 0.75f);
+        CGContextSetRGBStrokeColor(ctx, 1.0f, 0.80f, 0.0f, 0.80f);
         CGContextSetLineWidth(ctx, 1.8f);
         CGContextMoveToPoint(ctx, self.playerPt.x, self.playerPt.y);
         CGContextAddLineToPoint(ctx, self.rightPostPt.x, self.rightPostPt.y);
@@ -107,7 +108,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
         CGContextRestoreGState(ctx);
 
         // İki direk arası kale ağzı çizgisi
-        CGContextSetRGBStrokeColor(ctx, 0.2f, 1.0f, 0.4f, 0.80f);
+        CGContextSetRGBStrokeColor(ctx, 0.2f, 1.0f, 0.4f, 0.85f);
         CGContextSetLineWidth(ctx, 2.2f);
         CGContextMoveToPoint(ctx, self.leftPostPt.x, self.leftPostPt.y);
         CGContextAddLineToPoint(ctx, self.rightPostPt.x, self.rightPostPt.y);
@@ -121,7 +122,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
         CGContextSetLineWidth(ctx, 2.0f);
         CGContextStrokeEllipseInRect(ctx, pRing);
 
-        // 3. SOL DİREK NOKTASI (● L90 - Parlak Turkuaz/Kırmızı Hedef Noktası)
+        // 3. SOL DİREK NOKTASI (● L90)
         CGRect lOuter = CGRectMake(self.leftPostPt.x - 8.0f, self.leftPostPt.y - 8.0f, 16.0f, 16.0f);
         CGRect lInner = CGRectMake(self.leftPostPt.x - 4.0f, self.leftPostPt.y - 4.0f, 8.0f, 8.0f);
         CGContextSetRGBFillColor(ctx, 0.0f, 0.92f, 1.0f, 0.95f);
@@ -132,7 +133,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
         CGContextSetRGBFillColor(ctx, 0.95f, 0.1f, 0.2f, 1.0f);
         CGContextFillEllipseInRect(ctx, lInner);
 
-        // 4. SAĞ DİREK NOKTASI (● R90 - Parlak Sarı/Kırmızı Hedef Noktası)
+        // 4. SAĞ DİREK NOKTASI (● R90)
         CGRect rOuter = CGRectMake(self.rightPostPt.x - 8.0f, self.rightPostPt.y - 8.0f, 16.0f, 16.0f);
         CGRect rInner = CGRectMake(self.rightPostPt.x - 4.0f, self.rightPostPt.y - 4.0f, 8.0f, 8.0f);
         CGContextSetRGBFillColor(ctx, 1.0f, 0.82f, 0.0f, 0.95f);
@@ -182,11 +183,12 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 @interface WpsShotManager : NSObject
 + (instancetype)sharedInstance;
 - (void)setupTweak;
-- (void)onKickButtonTouchedAt:(CGPoint)pos;
+- (void)onTouchEvent:(UITouch *)touch inWindow:(UIWindow *)win;
 - (void)onCapturedIOSurface:(IOSurfaceRef)surface;
 - (void)onMetalTextureCaptured:(id<MTLTexture>)tex;
 - (void)executeShotToRightCorner:(BOOL)targetRight;
 - (void)toggleAttackDirection;
+- (void)resetGoalToCenter;
 @end
 
 @implementation WpsShotManager {
@@ -199,15 +201,15 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
     BOOL _targetingRightCorner;
     BOOL _attackDirectionDown; // NO = Üst Kale (Varsayılan), YES = Alt Kale
     CGPoint _calibratedKickPos;
-    BOOL _isCalibrated;
 
     // Frame-accurate CADisplayLink şut & harita kale takip motoru
     CADisplayLink *_displayLink;
+    NSTimeInterval _lastFrameTime;
     CGFloat _chargeDuration; // Varsayılan: 0.64s
 
     // Aktif şut durumu
     BOOL _isShooting;
-    BOOL _shotMovedSent;
+    int _shotMoveStep;
     NSTimeInterval _shotStartTime;
     CGPoint _shotStartPt;
     CGPoint _shotEndPt;
@@ -216,17 +218,26 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
     __weak UIViewController *_activeFlutterVC;
 
     // Harita Üzerindeki Kalenin Gerçek Ekran Koordinatları (UIWindow Point Uzayında)
+    // Oyuncu yürüdükçe kamera oyuncuyla hareket ettiği için kale noktaları ters yönde (-vx*dt, -vy*dt) kayarak haritada SABİT kalır!
     CGPoint _leftPostScreenPt;   // ● L90
     CGPoint _rightPostScreenPt;  // ● R90
-    CGPoint _playerScreenPt;     // ⊕ Oyuncu
+    CGPoint _playerScreenPt;     // ⊕ Oyuncu (Kamera merkezinde)
     CGFloat _screenW;
     CGFloat _screenH;
-    int _lastLockMode;           // 0=Yok, 1=CezaSahası/Taç Kilidi, 2=Kale Ağı Kilidi
+    int _lastLockMode;           // 0=HaritaTakip, 1=SahaÇizgiKilit, 2=KaleAğıKilit
 
-    // FlutterMetalLayer / CAMetalLayer Framebuffer Yakalayıcı
+    // Sol Hareket Joystick Takibi (Takılma Korumalı 60 FPS Ters-Kamera Harita Sabitleyici)
+    __weak UITouch *_moveTouch;
+    CGPoint _moveOrigin;
+    CGPoint _moveCurrent;
+
+    // Metal / IOSurface Framebuffer Yakalayıcı
     IOSurfaceRef _latestSurface;
     id<MTLTexture> _currTexture;
     id<MTLTexture> _prevTexture;
+    uint8_t *_rowBuf0;
+    uint8_t *_rowBuf1;
+    size_t _rowBufCap;
     NSTimeInterval _lastVisionScanTime;
     BOOL _hasCustomToast;
 }
@@ -286,12 +297,27 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 
 - (void)updateBannerCoordinates {
     if (!_statusOverlay || _hasCustomToast) return;
-    NSString *lockTag = (_lastLockMode == 2) ? @"🟢KALE-KİLİT" : ((_lastLockMode == 1) ? @"🟡SAHA-KİLİT" : @"⚪️ARANIYOR");
-    _statusOverlay.message = [NSString stringWithFormat:@"%@ | L90:(%.0f,%.0f) R90:(%.0f,%.0f) | P:(%.0f,%.0f)",
+    NSString *lockTag = (_lastLockMode == 2) ? @"🟢KALE-KİLİT" : ((_lastLockMode == 1) ? @"🟡SAHA-KİLİT" : @"🔵HARİTA-SABİT");
+    _statusOverlay.message = [NSString stringWithFormat:@"%@ | L90:(%.0f,%.0f) R90:(%.0f,%.0f) [Sıfırlamak İçin Bara Dokun]",
                               lockTag,
                               _leftPostScreenPt.x, _leftPostScreenPt.y,
-                              _rightPostScreenPt.x, _rightPostScreenPt.y,
-                              _playerScreenPt.x, _playerScreenPt.y];
+                              _rightPostScreenPt.x, _rightPostScreenPt.y];
+}
+
+- (void)resetGoalToCenter {
+    CGFloat goalY = _attackDirectionDown ? (_screenH * 0.725f) : (_screenH * 0.275f);
+    // Gerçek saha merkezi (0.469*W) etrafında sol direk içi (0.418*W) ve sağ direk içi (0.520*W)
+    _leftPostScreenPt  = CGPointMake(_screenW * 0.418f, goalY);
+    _rightPostScreenPt = CGPointMake(_screenW * 0.520f, goalY);
+    _playerScreenPt    = CGPointMake(_screenW * 0.500f, _attackDirectionDown ? (_screenH * 0.420f) : (_screenH * 0.610f));
+
+    if (_statusOverlay) {
+        _statusOverlay.leftPostPt = _leftPostScreenPt;
+        _statusOverlay.rightPostPt = _rightPostScreenPt;
+        _statusOverlay.playerPt = _playerScreenPt;
+        [self updateBannerCoordinates];
+        [_statusOverlay setNeedsDisplay];
+    }
 }
 
 - (void)setupTweak {
@@ -311,13 +337,12 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
         self->_screenW = w;
         self->_screenH = h;
 
-        self->_calibratedKickPos = CGPointMake(761.0f, 212.0f);
-        self->_isCalibrated = YES;
+        // Mavi Kick Butonunun Ekran Görüntüsünden Ölçülen TAM MERKEZİ: (0.8523 * W, 0.4585 * H) -> (763.7, 189.8)
+        // Önceki (761, 212) değeri merkezden 22pt aşağıda olduğu için şut açısını saptırıyordu!
+        self->_calibratedKickPos = CGPointMake(w * 0.8523f, h * 0.4585f);
         self->_attackDirectionDown = NO;
 
-        self->_leftPostScreenPt  = CGPointMake(w * 0.420f, h * 0.285f);
-        self->_rightPostScreenPt = CGPointMake(w * 0.519f, h * 0.285f);
-        self->_playerScreenPt    = CGPointMake(w * 0.500f, h * 0.610f);
+        [self resetGoalToCenter];
 
         if (!self->_statusOverlay) {
             self->_statusOverlay = [[WpsStatusOverlay alloc] initWithFrame:CGRectMake(0, 0, w, h)];
@@ -325,7 +350,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
             self->_statusOverlay.rightPostPt = self->_rightPostScreenPt;
             self->_statusOverlay.playerPt = self->_playerScreenPt;
             [keyWin addSubview:self->_statusOverlay];
-            [self showToast:[NSString stringWithFormat:@"🟢 HARİTA KALE KİLİDİ AKTİF | ŞARJ: %.2fs", self->_chargeDuration] duration:3.0];
+            [self showToast:[NSString stringWithFormat:@"🟢 HARİTA KALE SABİTLEYİCİ AKTİF | ŞARJ: %.2fs", self->_chargeDuration] duration:3.0];
         }
 
         // ⚡SHOT Ana Butonu
@@ -359,7 +384,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
             [self->_shotBtn addSubview:subLbl];
 
             self->_aimLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 44, btnSize, 16)];
-            self->_aimLabel.text = @"🎯 KALEYE";
+            self->_aimLabel.text = @"🎯 ÇİZGİYE";
             self->_aimLabel.font = [UIFont boldSystemFontOfSize:8.5f];
             self->_aimLabel.textColor = [UIColor colorWithRed:0.3f green:1.0f blue:0.5f alpha:1.0f];
             self->_aimLabel.textAlignment = NSTextAlignmentCenter;
@@ -411,6 +436,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
         }
 
         if (!self->_displayLink) {
+            self->_lastFrameTime = CACurrentMediaTime();
             self->_displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(onDisplayLink:)];
             [self->_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
         }
@@ -436,7 +462,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 }
 
 // ==========================================
-// FlutterMetalLayer / CALayer Ağacından Canlı IOSurface Yakalama
+// Metal MTLTexture getBytes & IOSurface Okuyucu
 // ==========================================
 - (void)onCapturedIOSurface:(IOSurfaceRef)surface {
     if (surface) {
@@ -452,256 +478,223 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
     _currTexture = tex;
 }
 
-- (IOSurfaceRef)findIOSurfaceInLayer:(CALayer *)layer depth:(int)depth {
-    if (!layer || depth > 8) return NULL;
-
-    // 1. FlutterMetalLayer her karede layer.contents = (__bridge id)iosurface atar!
-    id contents = layer.contents;
-    if (contents) {
-        CFTypeRef cf = (__bridge CFTypeRef)contents;
-        if (CFGetTypeID(cf) == IOSurfaceGetTypeID()) {
-            return (IOSurfaceRef)cf;
+- (BOOL)readScanline:(size_t)y into:(uint8_t *)buf width:(size_t)W fromSurfaceBase:(uint8_t *)base bpr:(size_t)bpr orTexture:(id<MTLTexture>)tex {
+    if (base) {
+        memcpy(buf, base + y * bpr, W * 4);
+        return YES;
+    }
+    if (tex && !tex.framebufferOnly) {
+        @try {
+            [tex getBytes:buf bytesPerRow:W * 4 fromRegion:MTLRegionMake2D(0, y, W, 1) mipmapLevel:0];
+            return YES;
+        } @catch (NSException *ex) {
+            return NO;
         }
     }
-
-    // 2. FlutterMetalLayer -> _front ivar -> _surface ivar kontrolü
-    Ivar frontIvar = class_getInstanceVariable([layer class], "_front");
-    if (frontIvar) {
-        id frontObj = object_getIvar(layer, frontIvar);
-        if (frontObj) {
-            Ivar surfIvar = class_getInstanceVariable([frontObj class], "_surface");
-            if (surfIvar) {
-                id surfObj = object_getIvar(frontObj, surfIvar);
-                if (surfObj && CFGetTypeID((__bridge CFTypeRef)surfObj) == IOSurfaceGetTypeID()) {
-                    return (__bridge IOSurfaceRef)surfObj;
-                }
-            }
-            Ivar texIvar = class_getInstanceVariable([frontObj class], "_texture");
-            if (texIvar) {
-                id texObj = object_getIvar(frontObj, texIvar);
-                if (texObj && [texObj respondsToSelector:@selector(iosurface)]) {
-                    typedef IOSurfaceRef (*GetSurfaceFn)(id, SEL);
-                    IOSurfaceRef s = ((GetSurfaceFn)objc_msgSend)(texObj, @selector(iosurface));
-                    if (s) return s;
-                }
-            }
-        }
-    }
-
-    for (CALayer *sub in [layer.sublayers copy]) {
-        IOSurfaceRef found = [self findIOSurfaceInLayer:sub depth:depth + 1];
-        if (found) return found;
-    }
-    return NULL;
-}
-
-- (IOSurfaceRef)acquireActiveIOSurface {
-    UIWindow *keyWin = [UIApplication sharedApplication].keyWindow;
-    if (!keyWin) {
-        for (UIWindow *w in [UIApplication sharedApplication].windows) {
-            if (w.isKeyWindow) { keyWin = w; break; }
-        }
-    }
-    if (keyWin) {
-        IOSurfaceRef fromLayer = [self findIOSurfaceInLayer:keyWin.layer depth:0];
-        if (fromLayer) return fromLayer;
-    }
-    if (_latestSurface) return _latestSurface;
-
-    id<MTLTexture> tex = _prevTexture ? _prevTexture : _currTexture;
-    if (tex && [tex respondsToSelector:@selector(iosurface)]) {
-        typedef IOSurfaceRef (*GetSurfaceFn)(id, SEL);
-        return ((GetSurfaceFn)objc_msgSend)(tex, @selector(iosurface));
-    }
-    return NULL;
+    return NO;
 }
 
 // ==========================================
-// Haritadaki Kalenin Direklerini (L90/R90) ve Ceza Sahasını Canlı Takip
+// Boşluk Toleranslı (Gap-Tolerant) Kale Ağı & Saha Çizgisi Tarayıcısı
 // ==========================================
 - (void)scanLiveFrameForGoalPostsAndPlayer {
     if (_screenW < 100.0f || _screenH < 100.0f) return;
 
-    IOSurfaceRef surface = [self acquireActiveIOSurface];
-    if (!surface) return;
+    id<MTLTexture> tex = _prevTexture ? _prevTexture : _currTexture;
+    IOSurfaceRef surface = _latestSurface;
+    if (!surface && tex && [tex respondsToSelector:@selector(iosurface)]) {
+        typedef IOSurfaceRef (*GetSurfaceFn)(id, SEL);
+        surface = ((GetSurfaceFn)objc_msgSend)(tex, @selector(iosurface));
+    }
 
-    if (IOSurfaceLock(surface, 1 /* kIOSurfaceLockReadOnly */, NULL) != 0) {
+    uint8_t *base = NULL;
+    size_t W = 0, H = 0, bpr = 0;
+    BOOL lockedSurface = NO;
+
+    if (surface && IOSurfaceLock(surface, 1 /* kIOSurfaceLockReadOnly */, NULL) == 0) {
+        lockedSurface = YES;
+        base = (uint8_t *)IOSurfaceGetBaseAddress(surface);
+        W = IOSurfaceGetWidth(surface);
+        H = IOSurfaceGetHeight(surface);
+        bpr = IOSurfaceGetBytesPerRow(surface);
+        if (!base || W < 400 || H < 250 || bpr < W * 4) {
+            base = NULL;
+        }
+    }
+
+    if (!base && tex && !tex.framebufferOnly) {
+        W = tex.width;
+        H = tex.height;
+    }
+
+    if (W < 400 || H < 250) {
+        if (lockedSurface) IOSurfaceUnlock(surface, 1, NULL);
         return;
     }
 
-    uint8_t *base = (uint8_t *)IOSurfaceGetBaseAddress(surface);
-    size_t W = IOSurfaceGetWidth(surface);
-    size_t H = IOSurfaceGetHeight(surface);
-    size_t bpr = IOSurfaceGetBytesPerRow(surface);
+    if (_rowBufCap < W * 4) {
+        free(_rowBuf0);
+        free(_rowBuf1);
+        _rowBufCap = W * 4;
+        _rowBuf0 = (uint8_t *)malloc(_rowBufCap);
+        _rowBuf1 = (uint8_t *)malloc(_rowBufCap);
+    }
 
-    if (!base || W < 400 || H < 250 || bpr < W * 4) {
+    // Kayan Pencere (Sliding Window) Boşluk-Toleranslı Kale Ağı Tespiti:
+    // Piksel-art kale ağındaki delikleri ve kalecinin kafasını tolere eder!
+    size_t goalW = (size_t)(W * 0.125);
+    size_t netY0 = _attackDirectionDown ? (size_t)(H * 0.60) : (size_t)(H * 0.15);
+    size_t netY1 = _attackDirectionDown ? (size_t)(H * 0.95) : (size_t)(H * 0.42);
+    size_t dyStep = (size_t)fmax(3.0, H * 0.012);
+    size_t yStride = (size_t)fmax(4.0, H * 0.010);
+
+    int bestScore = 0;
+    size_t bestXL = 0, bestXR = 0, bestY = 0;
+
+    for (size_t y = netY0; y + dyStep < netY1; y += yStride) {
+        if (![self readScanline:y into:_rowBuf0 width:W fromSurfaceBase:base bpr:bpr orTexture:tex]) break;
+        if (![self readScanline:y + dyStep into:_rowBuf1 width:W fromSurfaceBase:base bpr:bpr orTexture:tex]) break;
+
+        size_t margin = (size_t)(W * 0.015);
+        for (size_t xL = margin + 4; xL + goalW + margin + 4 < W; xL += 4) {
+            uint8_t *pL0 = _rowBuf0 + xL * 4;
+            if (!(pL0[2] > 105 && pL0[1] > 108 && pL0[0] > 105 && abs((int)pL0[2] - (int)pL0[0]) < 32)) continue;
+
+            size_t xR = xL + goalW;
+            // Sol dışında ve sağ dışında yeşil çim (G > R + 22 ve R < 85) olmalı
+            uint8_t *gL = _rowBuf0 + (xL - margin) * 4;
+            uint8_t *gR = _rowBuf0 + (xR + margin) * 4;
+            if (!((int)gL[1] > (int)gL[2] + 22 && gL[2] < 88 &&
+                  (int)gR[1] > (int)gR[2] + 22 && gR[2] < 88)) {
+                continue;
+            }
+
+            int score = 0;
+            int samples = 0;
+            size_t xStep = (size_t)fmax(2.0, goalW / 32);
+            for (size_t k = xL; k <= xR; k += xStep) {
+                uint8_t *c0 = _rowBuf0 + k * 4;
+                uint8_t *c1 = _rowBuf1 + k * 4;
+                BOOL hit0 = (c0[2] > 105 && c0[1] > 108 && c0[0] > 105 && abs((int)c0[2] - (int)c0[0]) < 32);
+                BOOL hit1 = (c1[2] > 105 && c1[1] > 108 && c1[0] > 105 && abs((int)c1[2] - (int)c1[0]) < 32);
+                if (hit0 || hit1) score++;
+                samples++;
+            }
+
+            if (samples > 0 && score >= (samples * 6) / 10 && score > bestScore) {
+                bestScore = score;
+                bestXL = xL;
+                bestXR = xR;
+                bestY = y;
+            }
+        }
+    }
+
+    if (lockedSurface) {
         IOSurfaceUnlock(surface, 1, NULL);
-        return;
     }
 
-    // 1. Oyuncunun Sarı İsmini (rayancherki31) Bul -> ⊕ Oyuncu Noktası
-    long sumX = 0, sumY = 0, yellowCount = 0;
-    size_t pY0 = (size_t)(H * 0.25), pY1 = (size_t)(H * 0.82);
-    size_t pX0 = (size_t)(W * 0.20), pX1 = (size_t)(W * 0.65);
+    if (bestScore > 0) {
+        CGFloat normLeftX  = ((CGFloat)bestXL / (CGFloat)W) + 0.010f;
+        CGFloat normRightX = ((CGFloat)bestXR / (CGFloat)W) - 0.010f;
+        CGFloat normGoalY  = _attackDirectionDown
+            ? (((CGFloat)bestY / (CGFloat)H) - 0.010f)
+            : (((CGFloat)bestY / (CGFloat)H) + 0.064f);
 
-    for (size_t y = pY0; y < pY1; y += 3) {
-        uint8_t *row = base + y * bpr;
-        for (size_t x = pX0; x < pX1; x += 3) {
-            uint8_t b = row[x * 4 + 0];
-            uint8_t g = row[x * 4 + 1];
-            uint8_t r = row[x * 4 + 2];
-            if (r > 210 && g > 195 && b < 85) {
-                sumX += (long)x;
-                sumY += (long)y;
-                yellowCount++;
-            }
+        _leftPostScreenPt  = CGPointMake(normLeftX * _screenW, normGoalY * _screenH);
+        _rightPostScreenPt = CGPointMake(normRightX * _screenW, normGoalY * _screenH);
+        _lastLockMode = 2;
+
+        if (_statusOverlay) {
+            _statusOverlay.leftPostPt = _leftPostScreenPt;
+            _statusOverlay.rightPostPt = _rightPostScreenPt;
+            _statusOverlay.playerPt = _playerScreenPt;
+            _statusOverlay.lockMode = _lastLockMode;
+            [self updateBannerCoordinates];
+            [_statusOverlay setNeedsDisplay];
         }
-    }
-
-    if (yellowCount >= 5) {
-        CGFloat normPX = ((CGFloat)sumX / (CGFloat)yellowCount) / (CGFloat)W;
-        CGFloat normPY = (((CGFloat)sumY / (CGFloat)yellowCount) / (CGFloat)H) + 0.075f;
-        _playerScreenPt = CGPointMake(normPX * _screenW, fminf(_screenH * 0.88f, normPY * _screenH));
-    }
-
-    // 2. KALE AĞLARINI DOĞRUDAN YAKALA (Haritadaki Gerçek Sol ve Sağ Direk Koordinatları!)
-    BOOL foundGoalNet = NO;
-    size_t netY0 = _attackDirectionDown ? (size_t)(H * 0.58) : (size_t)(H * 0.14);
-    size_t netY1 = _attackDirectionDown ? (size_t)(H * 0.97) : (size_t)(H * 0.44);
-    size_t dyStep = (size_t)fmax(2.0, H * 0.008);
-
-    for (size_t y = netY0; y + dyStep < netY1; y += 3) {
-        uint8_t *row0 = base + y * bpr;
-        uint8_t *row1 = base + (y + dyStep) * bpr;
-        long runStart = -1;
-
-        for (size_t x = (size_t)(W * 0.03); x < (size_t)(W * 0.96); x += 2) {
-            uint8_t b0 = row0[x * 4 + 0], g0 = row0[x * 4 + 1], r0 = row0[x * 4 + 2];
-            uint8_t b1 = row1[x * 4 + 0], g1 = row1[x * 4 + 1], r1 = row1[x * 4 + 2];
-
-            BOOL isNet = (r0 > 105 && g0 > 110 && b0 > 105 && abs((int)r0 - (int)b0) < 30 &&
-                          r1 > 105 && g1 > 110 && b1 > 105 && abs((int)r1 - (int)b1) < 30);
-            if (isNet) {
-                if (runStart == -1) runStart = (long)x;
-            } else {
-                if (runStart != -1) {
-                    long rw = (long)x - runStart;
-                    if (rw >= (long)(W * 0.095) && rw <= (long)(W * 0.165)) {
-                        size_t xL = (runStart > 14) ? (size_t)(runStart - 12) : 2;
-                        size_t xR = (x + 12 < W) ? (x + 12) : (W - 2);
-                        uint8_t *pL = row0 + xL * 4;
-                        uint8_t *pR = row0 + xR * 4;
-                        if ((int)pL[1] > (int)pL[2] + 22 && (int)pR[1] > (int)pR[2] + 22) {
-                            CGFloat normLeftX  = ((CGFloat)runStart / (CGFloat)W) + 0.011f;
-                            CGFloat normRightX = ((CGFloat)x / (CGFloat)W) - 0.011f;
-                            CGFloat normGoalY  = _attackDirectionDown
-                                ? (((CGFloat)y / (CGFloat)H) - 0.010f)
-                                : (((CGFloat)y / (CGFloat)H) + 0.068f);
-
-                            _leftPostScreenPt  = CGPointMake(normLeftX * _screenW, normGoalY * _screenH);
-                            _rightPostScreenPt = CGPointMake(normRightX * _screenW, normGoalY * _screenH);
-                            foundGoalNet = YES;
-                            _lastLockMode = 2;
-                            break;
-                        }
-                    }
-                    runStart = -1;
-                }
-            }
-        }
-        if (foundGoalNet) break;
-    }
-
-    // 3. Kale Ağı Ekran Dışındayken (Örn: Çok Sağ/Sol Kornerde veya Orta Sahada):
-    // Ceza Sahası Çizgi Çifti (Fark = 0.3789*W) ve Taç-Ceza Sahası Çifti (Fark = 0.2360*W) Çözücüsü!
-    if (!foundGoalNet) {
-        CGFloat vLines[24];
-        int vCount = 0;
-        size_t bY0 = _attackDirectionDown ? (size_t)(H * 0.50) : (size_t)(H * 0.32);
-        size_t bY1 = _attackDirectionDown ? (size_t)(H * 0.68) : (size_t)(H * 0.50);
-        size_t sY = (size_t)fmax(2.0, (bY1 - bY0) / 14);
-
-        for (size_t x = (size_t)(W * 0.02); x < (size_t)(W * 0.80) && vCount < 24; x += 2) {
-            int hits = 0, tot = 0;
-            for (size_t y = bY0; y < bY1; y += sY) {
-                uint8_t *p0 = base + y * bpr + x * 4;
-                uint8_t *p1 = base + y * bpr + (x + 1) * 4;
-                if ((p0[2] > 150 && p0[1] > 160 && p0[0] > 150) ||
-                    (p1[2] > 150 && p1[1] > 160 && p1[0] > 150)) {
-                    hits++;
-                }
-                tot++;
-            }
-            if (tot > 0 && hits >= (tot * 3) / 4) {
-                CGFloat nx = (CGFloat)x / (CGFloat)W;
-                if (vCount == 0 || (nx - vLines[vCount - 1]) > 0.03f) {
-                    vLines[vCount++] = nx;
-                }
-            }
-        }
-
-        CGFloat solvedGoalCenterNormX = -999.0f;
-        // Öncelik A: Ceza sahası sol ve sağ dikey çizgileri (aralarındaki mesafe sabit 0.3789 * W)
-        for (int i = 0; i < vCount; i++) {
-            for (int j = i + 1; j < vCount; j++) {
-                CGFloat dist = vLines[j] - vLines[i];
-                if (fabsf(dist - 0.3789f) < 0.018f) {
-                    solvedGoalCenterNormX = 0.5f * (vLines[i] + vLines[j]);
-                    break;
-                }
-            }
-            if (solvedGoalCenterNormX > -100.0f) break;
-        }
-        // Öncelik B: Sağ veya Sol Kornerdeyken Ceza Sahası + Dış Taç Çizgisi Çifti (mesafe sabit 0.2360 * W)
-        if (solvedGoalCenterNormX < -100.0f) {
-            for (int i = 0; i < vCount; i++) {
-                for (int j = i + 1; j < vCount; j++) {
-                    CGFloat dist = vLines[j] - vLines[i];
-                    if (fabsf(dist - 0.2360f) < 0.018f) {
-                        if (vLines[j] > 0.52f) {
-                            // Sağ ceza sahası çizgisi + Sağ taç çizgisi -> Kale solumuzda!
-                            solvedGoalCenterNormX = vLines[i] - 0.1895f;
-                        } else if (vLines[i] < 0.48f) {
-                            // Sol taç çizgisi + Sol ceza sahası çizgisi -> Kale sağımızda!
-                            solvedGoalCenterNormX = vLines[j] + 0.1895f;
-                        }
-                        break;
-                    }
-                }
-                if (solvedGoalCenterNormX > -100.0f) break;
-            }
-        }
-
-        if (solvedGoalCenterNormX > -100.0f) {
-            CGFloat goalY = _leftPostScreenPt.y;
-            if (goalY < 20.0f || goalY > _screenH - 20.0f) {
-                goalY = _attackDirectionDown ? (_screenH * 0.72f) : (_screenH * 0.285f);
-            }
-            _leftPostScreenPt  = CGPointMake((solvedGoalCenterNormX - 0.050f) * _screenW, goalY);
-            _rightPostScreenPt = CGPointMake((solvedGoalCenterNormX + 0.050f) * _screenW, goalY);
-            _lastLockMode = 1;
-        }
-    }
-
-    IOSurfaceUnlock(surface, 1, NULL);
-
-    if (_statusOverlay) {
-        _statusOverlay.leftPostPt = _leftPostScreenPt;
-        _statusOverlay.rightPostPt = _rightPostScreenPt;
-        _statusOverlay.playerPt = _playerScreenPt;
-        _statusOverlay.lockMode = _lastLockMode;
-        [self updateBannerCoordinates];
-        [_statusOverlay setNeedsDisplay];
     }
 }
 
 // ==========================================
-// 60 FPS CADisplayLink: Milisaniyelik Şut Bırakma & 20Hz Harita Kale Takibi
+// Sol Hareket Joystick & Üst Bar Dokunuş Yakalayıcı
+// ==========================================
+- (void)onTouchEvent:(UITouch *)touch inWindow:(UIWindow *)win {
+    CGPoint pt = [touch locationInView:win];
+
+    // Üst bilgi barına dokunulduysa kaleyi merkeze sıfırla (Santra / Başlangıç sıfırlaması)
+    if (touch.phase == UITouchPhaseBegan && pt.y < 36.0f && fabsf(pt.x - _screenW * 0.5f) < 220.0f) {
+        [self resetGoalToCenter];
+        AudioServicesPlaySystemSound(1519);
+        [self showToast:@"🎯 KALE NOKTALARI MERKEZE SIFIRLANDI" duration:1.5];
+        return;
+    }
+
+    // Sol Hareket Joystick'i: Oyuncu yürüdükçe kaleyi haritada SABİT tutmak için ters-kamera entegrasyonu
+    if (touch.phase == UITouchPhaseBegan && pt.x < (_screenW * 0.44f) && pt.y > (_screenH * 0.28f)) {
+        _moveTouch = touch;
+        _moveOrigin = pt;
+        _moveCurrent = pt;
+    } else if (touch == _moveTouch) {
+        if (touch.phase == UITouchPhaseMoved || touch.phase == UITouchPhaseStationary) {
+            _moveCurrent = pt;
+        } else if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
+            _moveTouch = nil;
+            _moveCurrent = _moveOrigin;
+        }
+    }
+}
+
+// ==========================================
+// 60 FPS CADisplayLink: Ters-Kamera Harita Sabitleyici & Kesikli Çizgi Şut Motoru
 // ==========================================
 - (void)onDisplayLink:(CADisplayLink *)link {
     NSTimeInterval now = CACurrentMediaTime();
+    CGFloat dt = (CGFloat)(now - _lastFrameTime);
+    if (dt <= 0.0f || dt > 0.15f) dt = 1.0f / 60.0f;
+    _lastFrameTime = now;
 
-    // 1. Aktif Şut Varsa Tam _chargeDuration (0.64s) Dolduğu Karede Bırak!
+    // 1. HARİTA KALE SABİTLEYİCİ (Ters-Kamera Hareketi):
+    // Kamera oyuncuyu ekranın ortasında (448, 253) sabit tuttuğu için:
+    // Oyuncu sağa (+vx) yürüdüğünde haritadaki kale ekranda sola (-vx) kayar!
+    // Oyuncu aşağı (+vy) yürüdüğünde haritadaki kale ekranda yukarı (-vy) kayar!
+    if (_moveTouch != nil) {
+        UITouchPhase ph = _moveTouch.phase;
+        if (ph == UITouchPhaseEnded || ph == UITouchPhaseCancelled) {
+            _moveTouch = nil;
+        } else {
+            CGFloat jdx = _moveCurrent.x - _moveOrigin.x;
+            CGFloat jdy = _moveCurrent.y - _moveOrigin.y;
+            CGFloat jlen = sqrtf(jdx * jdx + jdy * jdy);
+            if (jlen > 5.0f) {
+                // Joystick deadzone sonrası yön vektörü ve tam hız (185 pt/sn ekran kayma hızı)
+                CGFloat maxJoyR = 38.0f;
+                CGFloat throttle = fminf(1.0f, jlen / maxJoyR);
+                CGFloat ux = (jdx / jlen) * throttle;
+                CGFloat uy = (jdy / jlen) * throttle;
+
+                CGFloat playerSpeedPtPerSec = 185.0f;
+                CGFloat camShiftX = -ux * playerSpeedPtPerSec * dt;
+                CGFloat camShiftY = -uy * playerSpeedPtPerSec * dt;
+
+                CGFloat newLX = fmaxf(-120.0f, fminf(_screenW + 20.0f, _leftPostScreenPt.x + camShiftX));
+                CGFloat newRX = newLX + (_screenW * 0.102f); // Sabit kale genişliği (91.4 pt)
+                CGFloat newGY = fmaxf(-150.0f, fminf(_screenH + 150.0f, _leftPostScreenPt.y + camShiftY));
+
+                _leftPostScreenPt  = CGPointMake(newLX, newGY);
+                _rightPostScreenPt = CGPointMake(newRX, newGY);
+
+                if (_statusOverlay) {
+                    _statusOverlay.leftPostPt = _leftPostScreenPt;
+                    _statusOverlay.rightPostPt = _rightPostScreenPt;
+                    [self updateBannerCoordinates];
+                    [_statusOverlay setNeedsDisplay];
+                }
+            }
+        }
+    }
+
+    // 2. AKTİF ŞUT YÖNETİMİ (3 Kademeli Pürüzsüz Çekiş + Tam Tepe Noktasında Bırakma)
     if (_isShooting && _activeMockTouch && _activeFlutterVC) {
         NSTimeInterval elapsed = now - _shotStartTime;
         if (elapsed >= _chargeDuration) {
@@ -713,7 +706,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
             [_activeFlutterVC touchesEnded:[NSSet setWithObject:_activeMockTouch] withEvent:nil];
 
             _isShooting = NO;
-            _shotMovedSent = NO;
+            _shotMoveStep = 0;
             _activeMockTouch = nil;
 
             [UIView animateWithDuration:0.08 animations:^{
@@ -723,49 +716,53 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 
             AudioServicesPlaySystemSound(1520);
             [self showToast:[NSString stringWithFormat:@"🚀 ŞUT ATEŞLENDİ -> %@ (%.2fs) 🎯", _activeCornerName, _chargeDuration] duration:1.5];
-        } else if (elapsed >= 0.022) {
-            _activeMockTouch.customPreviousLocation = _shotMovedSent ? _shotEndPt : _shotStartPt;
-            _activeMockTouch.customLocation = _shotEndPt;
+        } else if (elapsed >= 0.015) {
+            // Mavi şut butonunun tam merkezinden (763.7, 189.8) kesikli çizgi yönüne 3 adımda pürüzsüz çek
+            _shotMoveStep++;
+            CGFloat frac = (_shotMoveStep == 1) ? 0.35f : ((_shotMoveStep == 2) ? 0.75f : 1.0f);
+            CGPoint curPt = CGPointMake(_shotStartPt.x + (_shotEndPt.x - _shotStartPt.x) * frac,
+                                        _shotStartPt.y + (_shotEndPt.y - _shotStartPt.y) * frac);
+
+            _activeMockTouch.customPreviousLocation = _activeMockTouch.customLocation;
+            _activeMockTouch.customLocation = curPt;
             _activeMockTouch.customPhase = UITouchPhaseMoved;
             _activeMockTouch.customTimestamp = [NSDate timeIntervalSinceReferenceDate];
 
             [_activeFlutterVC touchesMoved:[NSSet setWithObject:_activeMockTouch] withEvent:nil];
-            _shotMovedSent = YES;
         }
     }
 
-    // 2. Her 50ms'de bir (Saniyede 20 kez) Haritadaki Kale Direği Noktalarını (L90 / R90) Güncelle
-    if (now - _lastVisionScanTime >= 0.05) {
+    // 3. Her 80ms'de bir Metal/IOSurface üzerinden optik kale ağı kilidini kontrol et
+    if (now - _lastVisionScanTime >= 0.08) {
         _lastVisionScanTime = now;
         [self scanLiveFrameForGoalPostsAndPlayer];
     }
 }
 
 // ==========================================
-// Doğrudan Haritada Boyanan Direk Noktasına (● L90 veya ● R90) Vektör Hesabı
+// Kesikli Çizgiyle %100 Birebir Örtüşen Şut Vektörü Hesabı
 // ==========================================
 - (CGPoint)computeDirectVectorToPaintedDot:(BOOL)targetRight {
     [self scanLiveFrameForGoalPostsAndPlayer];
 
     CGPoint targetDot = targetRight ? _rightPostScreenPt : _leftPostScreenPt;
-    CGFloat dx = targetDot.x - _playerScreenPt.x;
-    CGFloat dy = targetDot.y - _playerScreenPt.y;
+    CGFloat rawDX = targetDot.x - _playerScreenPt.x;
+    CGFloat rawDY = targetDot.y - _playerScreenPt.y;
+
+    // Oyunun _computeAim içindeki kickHorizontalFactor (~1.40x yatay çarpan) sapmasını dengele:
+    // Böylece oyunun sarı/turuncu şut çizgisi ekrandaki kesikli çizginin TAM ÜSTÜNDEN geçer!
+    CGFloat dx = rawDX * 0.72f;
+    CGFloat dy = rawDY;
 
     CGFloat len = sqrtf(dx * dx + dy * dy);
     if (len < 1.0f) {
-        dx = targetRight ? 18.0f : -18.0f;
-        dy = _attackDirectionDown ? 80.0f : -80.0f;
+        dx = targetRight ? 15.0f : -15.0f;
+        dy = _attackDirectionDown ? 78.0f : -78.0f;
         len = sqrtf(dx * dx + dy * dy);
     }
 
-    CGFloat dragRadius = 84.0f;
+    CGFloat dragRadius = 78.0f;
     return CGPointMake((dx / len) * dragRadius, (dy / len) * dragRadius);
-}
-
-- (void)onKickButtonTouchedAt:(CGPoint)pos {
-    _calibratedKickPos = pos;
-    _isCalibrated = YES;
-    [self showToast:[NSString stringWithFormat:@"🎯 ŞUT BUTONU GÜNCELLENDİ: (%.0f, %.0f)", pos.x, pos.y] duration:2.0];
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)p {
@@ -786,17 +783,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 
 - (void)toggleAttackDirection {
     _attackDirectionDown = !_attackDirectionDown;
-    CGFloat goalY = _attackDirectionDown ? (_screenH * 0.72f) : (_screenH * 0.285f);
-    _leftPostScreenPt  = CGPointMake(_screenW * 0.420f, goalY);
-    _rightPostScreenPt = CGPointMake(_screenW * 0.519f, goalY);
-    _playerScreenPt    = CGPointMake(_screenW * 0.500f, _attackDirectionDown ? (_screenH * 0.42f) : (_screenH * 0.61f));
-
-    if (_statusOverlay) {
-        _statusOverlay.leftPostPt = _leftPostScreenPt;
-        _statusOverlay.rightPostPt = _rightPostScreenPt;
-        _statusOverlay.playerPt = _playerScreenPt;
-        [_statusOverlay setNeedsDisplay];
-    }
+    [self resetGoalToCenter];
 
     AudioServicesPlaySystemSound(1519);
     NSString *dirText = _attackDirectionDown ? @"⬇️ HEDEF: ALT KALE" : @"⬆️ HEDEF: ÜST KALE";
@@ -827,7 +814,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 }
 
 // ==========================================
-// Doğrudan Haritada Boyanan Direk Noktasına (L90 / R90) Şut İcrası
+// Kesikli Çizgi Üzerinden Boyalı Direk Noktasına (L90 / R90) Şut İcrası
 // ==========================================
 - (void)executeShotToRightCorner:(BOOL)targetRight {
     if (_isShooting) return;
@@ -842,6 +829,9 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 
     UIViewController *fvc = [self findFlutterVC:keyWin.rootViewController];
     if (!fvc) return;
+
+    // Mavi şut butonunun tam merkezini (0.8523*W, 0.4585*H) kullan!
+    _calibratedKickPos = CGPointMake(_screenW * 0.8523f, _screenH * 0.4585f);
 
     CGPoint dragVec = [self computeDirectVectorToPaintedDot:targetRight];
     CGPoint startPt = _calibratedKickPos;
@@ -868,7 +858,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
     _shotStartPt = startPt;
     _shotEndPt = endPt;
     _shotStartTime = CACurrentMediaTime();
-    _shotMovedSent = NO;
+    _shotMoveStep = 0;
     _isShooting = YES;
 
     [fvc touchesBegan:[NSSet setWithObject:touch] withEvent:nil];
@@ -877,8 +867,51 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 @end
 
 // ==========================================
-// CALayer & CAMetalLayer Hook: FlutterMetalLayer IOSurface Yakalama
+// CAMetalLayer & CALayer Hook: FramebufferOnly=NO Zorlama + Texture/IOSurface Yakalama
 // ==========================================
+@interface CAMetalLayer (WpsMetalCapture)
+@end
+
+@implementation CAMetalLayer (WpsMetalCapture)
+
++ (void)load {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        Class cls = [CAMetalLayer class];
+
+        SEL s1 = @selector(setFramebufferOnly:);
+        SEL w1 = @selector(wps_setFramebufferOnly:);
+        Method m1 = class_getInstanceMethod(cls, s1);
+        Method mw1 = class_getInstanceMethod(cls, w1);
+        if (m1 && mw1) method_exchangeImplementations(m1, mw1);
+
+        SEL s2 = @selector(nextDrawable);
+        SEL w2 = @selector(wps_nextDrawable);
+        Method m2 = class_getInstanceMethod(cls, s2);
+        Method mw2 = class_getInstanceMethod(cls, w2);
+        if (m2 && mw2) method_exchangeImplementations(m2, mw2);
+    });
+}
+
+- (void)wps_setFramebufferOnly:(BOOL)framebufferOnly {
+    // Texture'ların CPU'dan getBytes: ile okunabilmesi için daima NO zorla!
+    [self wps_setFramebufferOnly:NO];
+}
+
+- (id<CAMetalDrawable>)wps_nextDrawable {
+    [self wps_setFramebufferOnly:NO];
+    id<CAMetalDrawable> drawable = [self wps_nextDrawable];
+    if (drawable) {
+        id<MTLTexture> tex = [drawable texture];
+        if (tex) {
+            [[WpsShotManager sharedInstance] onMetalTextureCaptured:tex];
+        }
+    }
+    return drawable;
+}
+
+@end
+
 @interface CALayer (WpsSurfaceCapture)
 @end
 
@@ -911,7 +944,7 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 @end
 
 // ==========================================
-// UIWindow Hook: Şut Butonu Otomatik Kalibrasyon
+// UIWindow Hook: Sol Hareket Joystick Takibi
 // ==========================================
 @interface UIWindow (WpsTouchCapture)
 @end
@@ -937,22 +970,9 @@ extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 
     if (event.type == UIEventTypeTouches) {
         NSSet *touches = [event allTouches];
-        CGSize scr = [UIScreen mainScreen].bounds.size;
-        CGFloat w = MAX(scr.width, scr.height);
-        CGFloat h = MIN(scr.width, scr.height);
-
         for (UITouch *touch in touches) {
             if ([touch isKindOfClass:[WpsMockTouch class]]) continue;
-
-            if (touch.phase == UITouchPhaseBegan) {
-                CGPoint pt = [touch locationInView:self];
-                if (pt.x > (w * 0.55f) && pt.y > (h * 0.40f)) {
-                    UIView *hitView = [self hitTest:pt withEvent:event];
-                    if (![hitView isKindOfClass:[UIButton class]]) {
-                        [[WpsShotManager sharedInstance] onKickButtonTouchedAt:pt];
-                    }
-                }
-            }
+            [[WpsShotManager sharedInstance] onTouchEvent:touch inWindow:self];
         }
     }
 }
